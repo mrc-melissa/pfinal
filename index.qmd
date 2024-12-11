@@ -1,0 +1,989 @@
+---
+title: "Proyecto Final"
+authors: Susana Briceño Guevara & Melisa Rodríguez
+date: Diciembre, 2024
+format: html
+editor: visual
+engine: knitr
+theme: Sandstone
+toc: true
+toc_float: true
+lang: es
+website:
+  title: Proyecto final
+  navbar:
+    background: primary
+    search: true
+---
+
+```{css, echo = FALSE}
+.justify {
+  text-align: justify !important
+}
+```
+
+![UCR-logo](UCR-logo.png){width="25%"}\
+
+Universidad de Costa Rica\
+Maestría en Gestión Integrada del Recurso Hídrico\
+PF-0953 Programación en R
+
+# Modelo de nicho ecológico y escanerio de clima futuro de la especie *Myrmecophaga tridactyla*
+
+## 1. Descripción de la especie
+
+El oso hormiguero gigante u `oso caballo` como se conoce en Costa Rica es de la especie *Myrmecophaga tridactyla*. Su dieta está compuesta principalmente de hormigas, que obtiene rompiendo los nidos con sus poderosas garras delanteras.
+
+\[![oso_caballo](oso_caballo.jpg)\]
+
+Figura 1. Ilustración del oso caballo, hormiguero gigante o *Myrmecophaga tridactyla*
+
+**Distribución** El oso caballo se encuentra desde el Sur de Belize, a través de Centro y Suramérica, hasta la Argentina. Actualmente es un animal muy raro en Centroamérica, incluyendo Costa Rica, donde están en inminente peligro de extinción. Recientemente sólo se dispone de reportes de la especie en Corcovado y la Reserva Forestal de San Ramón. Habita tanto en los bosques tropicales como los pantanos y las sabanas arboladas.
+
+**Alimentación** Su dieta está compuesta principalmente de hormigas, que obtiene rompiendo los nidos con sus poderosas garras delanteras. Se ha reportado que un oso caballo puede desplazarse en busca de alimento hasta 11 km en una sola noche.
+
+**Peligros que enfrenta**
+- La cacería furtiva.\
+- La pérdida de su hábitat.\
+- Desafortunadamente la especie desaparecerá de nuestro país antes de que podamos entender su ecología y comportamiento.
+
+------------------------------------------------------------------------
+
+## 2. Modelo de nicho ecológico para clima actual
+
+Los modelos de nichos ecológicos son herramientas fundamentales en la biología y la ecología para entender la distribución de las especies y predecir cómo podrían responder a cambios ambientales. Por lo tanto, para la evaluación del modelo de nicho ecologico se utilizará la especie *Myrmecophaga tridactyla*.
+
+Los modelos permiten comprender las condiciones ambientales en las cuales las especies pueden sobrevivir y reproducirse. Además proyectan cómo las distribuciones de las especies podrían cambiar bajo diferentes escenarios de cambio climático.
+
+A continuacón se muestran los códigos de R para la generación de los modelos de nichos ecológicos. Primero se identifica la especie en la cual se utiliza el oso caballo, con una delimitación del área y resolución de los datos de clima. Para el análisis se escoge el escenario 585.
+
+```{r}
+#| label: definicion
+#| message: false
+#| warning: false
+
+
+# Nombre de la especie
+especie <- "Myrmecophaga tridactyla"
+
+# Desplazamiento (offset) para delimitar el área de estudio
+desplazamiento = 5
+
+# Resolución espacial de los datos climáticos
+resolucion = 10
+
+# SSP
+ssp <- "585"
+
+# GCM
+gcm <- "HadGEM3-GC31-LL"
+
+# Proporción de datos de entrenamiento a utilizar en el modelo
+proporcion_entrenamiento = 0.7
+```
+
+```{r}
+#| label: librerias
+#| message: false
+#| warning: false
+
+# Colección de paquetes de Tidyverse
+library(tidyverse)
+
+# Estilos para ggplot2
+library(ggthemes)
+
+# Paletas de colores de RColorBrewer
+library(RColorBrewer)
+
+# Paletas de colores de viridis
+library(viridisLite)
+
+# Gráficos interactivos
+library(plotly)
+
+# Manejo de datos vectoriales
+library(sf)
+
+# Manejo de datos raster
+library(terra)
+
+# Manejo de datos raster
+library(raster)
+
+# Mapas interactivos
+library(leaflet)
+
+# Acceso a datos en GBIF
+library(rgbif)
+
+# Acceso a datos climáticos
+library(geodata)
+
+# Modelado de distribución de especies
+library(dismo)
+
+library(rJava)
+```
+
+### 2.1 Obtención de datos de presencia
+
+Se obtinen los datos de presencia de la consulta de [GBIF](https://www.gbif.org/) (Global Biodiversity Information Facility) los datos son de acceso abierto sobre todos los tipos de vida en la Tierra.
+
+```{r}
+#| label: presencia
+#| message: false
+#| warning: false
+
+# Consultar el API de GBIF
+respuesta <- occ_search(
+  scientificName = especie, 
+  hasCoordinate = TRUE,
+  hasGeospatialIssue = FALSE,
+  limit = 10000
+)
+
+# Extraer datos de presencia
+presencia <- respuesta$data
+```
+
+```{r}
+#| label: csv
+#| message: false
+#| warning: false
+#| eval: false
+
+# Guardar los datos de presencia en un archivo CSV
+write_csv(presencia, 'presencia.csv')
+```
+
+```{r}
+#| label: csv_leer
+#| message: false
+#| warning: false
+
+# Leer en un dataframe los datos de presencia de un archivo CSV
+presencia <- read_csv('presencia.csv')
+
+# Crear un objeto sf a partir del dataframe, crea geometrias de puntos
+presencia <- st_as_sf(
+  presencia,
+  coords = c("decimalLongitude", "decimalLatitude"),
+  remove = FALSE, # conservar las columnas de las coordenadas
+  crs = 4326
+)
+```
+
+### 2.2 Delimitación de área de estudio
+
+```{r}
+#| label: delimitacion_2
+#| message: false
+#| warning: false
+
+
+# Delimitar la extensión del área de estudio
+area_estudio <- ext(
+  min(presencia$decimalLongitude) - 20, 
+  max(presencia$decimalLongitude) + 20,
+  min(presencia$decimalLatitude) - 20, 
+  max(presencia$decimalLatitude) + 20
+)
+```
+
+### 2.3 Obtención de datos de clima actual
+
+```{r}
+#| label: delimitacion-3
+#| message: false
+#| warning: false
+
+# Obtener datos climáticos actuales
+clima_actual <- worldclim_global(
+  var = 'bio', 
+  res = resolucion, 
+  path = tempdir()
+)
+
+# Recortar los datos climáticos para el área de estudio
+clima_actual <- crop(clima_actual, area_estudio)
+
+# Desplegar nombres de las variables climáticas
+names(clima_actual)
+```
+
+### 2.4 Obtención de datos de clima futuro
+
+```{r}
+#| label: datos_futuro
+#| message: false
+#| warning: false
+
+# Obtener datos climáticos para escenario futuro
+clima_futuro <- cmip6_world(
+  var = "bioc",
+  res = resolucion,
+  ssp = ssp,
+  model = gcm,
+  time = "2041-2060",
+  path = tempdir()
+)
+
+# Recortar los datos climáticos para el área de estudio
+clima_futuro <- crop(clima_futuro, area_estudio)
+
+# Desplegar nombres de las variables
+names(clima_futuro)
+```
+
+### 2.5 Creación de conjuntos de entrenamiento y de evaluación
+
+```{r}
+#| label: entremiento_01
+#| message: false
+#| warning: false
+
+# Crear dataframe con columnas de longitud y latitud
+coordenadas_presencia <- data.frame(
+  decimalLongitude = presencia$decimalLongitude,
+  decimalLatitude = presencia$decimalLatitude
+)
+
+# Eliminar coordenadas duplicadas
+coordenadas_presencia <- unique(coordenadas_presencia)
+```
+
+Se dividen los datos de presencia en dos subconjuntos:
+
+Entrenamiento: para desarrollar el modelo. Evaluación: para evaluar el modelo.
+
+```{r}
+#| label: entrenamiento_o2
+#| message: false
+#| warning: false
+
+# Establecer una "semilla" para garantizar que la selección aleatoria sea reproducible
+set.seed(123)
+
+# Cantidad de registros de presencia
+n_presencia <- nrow(coordenadas_presencia)
+
+# Con sample(), se selecciona aleatoriamente una proporción (ej. 0.7) 
+# de los índices de los datos de presencia para el conjunto de entrenamiento
+indices_entrenamiento <- sample(
+  1:n_presencia, 
+  size = round(proporcion_entrenamiento * n_presencia)
+)
+
+# Crear el subconjunto de entrenamiento utilizando los índices seleccionados
+entrenamiento <- coordenadas_presencia[indices_entrenamiento, ]
+
+# Crear el subconjunto de evaluación con los datos restantes
+evaluacion <- coordenadas_presencia[-indices_entrenamiento, ]
+```
+
+### 2.6 Modelo con clima actual
+
+```{r}
+#| label: clima_actual
+#| message: false
+#| warning: false
+
+# Los datos de clima deben convertirse al formato que usa el paquete raster
+# debido a es este el que acepta el paquete dismo
+clima_actual <- raster::stack(clima_actual)
+
+# Generar el modelo
+modelo_actual <- maxent(x = clima_actual, p = entrenamiento)
+
+# Aplicar el modelo entrenado al clima actual
+prediccion_actual <- predict(modelo_actual, clima_actual)
+```
+
+### 2.7 Modelo con clima futuro
+
+```{r}
+#| label: clima_futuro
+#| message: false
+#| warning: false
+
+# Convertir variables climáticas futuras al formato raster stack
+clima_futuro_raster <- raster::stack(clima_futuro)
+
+# Asegurar que las variables tengan los mismos nombres y orden
+names(clima_futuro_raster) <- names(clima_actual)
+
+# Proyectar el modelo al clima futuro
+prediccion_futuro <- predict(modelo_actual, clima_futuro_raster)
+```
+
+### 2.7 Diferencia
+
+```{r}
+#| label: diferencia
+#| message: false
+#| warning: false
+
+# Calcular la diferencia
+diferencia <- prediccion_futuro - prediccion_actual
+```
+
+### Curva de característica operativa del receptor (ROC) y cálculo de área bajo la curva (AUC)
+
+La curva [ROC](https://developers.google.com/machine-learning/crash-course/classification/roc-and-auc?hl=es-419#receiver-operating_characteristic_curve_roc) es una representación visual del rendimiento del modelo en todos los umbrales. El [AUC](https://developers.google.com/machine-learning/glossary?hl=es-419#auc-area-under-the-roc-curve) es un número entre 0.0 y 1.0 que representa la capacidad de un modelo de clasificación binaria para separar las clases positivas de las clases negativas. Cuanto más cerca esté el AUC a 1.0, mejor será la capacidad del modelo para separarse clases entre sí.
+
+Para la generación de la curva de ROC primero se carga un nuevo ráster stack con los datos de validación para realizar las predicciones de clima futuro con el escenario ssp 585.
+
+```{r}
+#| label: validacion_01
+#| message: false
+#| warning: false
+
+# terra::extract() extrae los valores del raster de predicción 
+# en las coordenadas de evaluación
+# eval_pres almacena los valores de idoneidad predichos 
+# en los puntos de evaluación de presencia
+eval_fut <- terra::extract(
+  prediccion_futuro, 
+  evaluacion[, c('decimalLongitude', 'decimalLatitude')]
+)
+
+# Generar puntos aleatorios dentro del área de estudio definida. 
+# Estos puntos se asumen como ausencias de la especie.
+ausencias <- randomPoints(mask = clima_futuro_raster, n = 1000)
+
+# eval_aus almacena los valores de idoneidad predichos
+# en los puntos de ausencia
+eval_aus <- terra::extract(
+  prediccion_futuro, 
+  ausencias
+)
+
+# Generar estadísticas de evaluación del modelo
+resultado_evaluacion <- evaluate(p = eval_fut, a = eval_aus)
+```
+
+Seguidamente se genera la curva ROC y el cálculo AUC para el modelo de nicho ecológico de clima futuro para el oso caballo
+
+```{r}
+#| label: roc_01
+#| message: false
+#| warning: false
+
+# Datos para graficar la curva ROC
+datos_roc <- data.frame(
+  FPR = resultado_evaluacion@FPR,
+  TPR = resultado_evaluacion@TPR,
+  Umbral = resultado_evaluacion@t
+)
+
+# Valor AUC
+auc <- resultado_evaluacion@auc
+
+# Gráfico ggplot2
+grafico_ggplot2 <-
+  ggplot(
+    datos_roc, 
+    aes(
+      x = FPR, 
+      y = TPR,
+      u = Umbral
+    )
+  ) +
+  geom_line(
+    color = "blue", 
+    size = 1
+  ) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(title = paste("Curva de característica operativa del receptor (ROC) para el modelo de clima futuro del oso caballo (AUC =", round(auc, 3), ")"),
+       x = "Tasa de falsos positivos (FPR)",
+       y = "Tasa de verdaderos positivos (TPR)") +
+  theme_minimal()
+
+# Gráfico plotly
+ggplotly(grafico_ggplot2) |> 
+  config(locale = 'es')
+```
+
+El valor del AUC es de 0,984 lo que indica que que el modelo tiene un excelente redimiento para la predición del clima futuro del oso caballo.
+
+## 3. Modelización de Probabilidad de presencia
+
+### 3.1 Presencia en el continente americano y su relación con variables de clima 
+
+Se filtraron los registros para el Continente Americano
+```{r}
+# Fitro países de Estados Unidos, hasta Chile y Argentina ya que no hay presencia en zonas templadas.
+Continente_Americano <- presencia %>%
+  filter(country %in% c(
+    "United States", "Mexico", "Guatemala", "Belize", "Honduras", 
+    "El Salvador", "Nicaragua", "Costa Rica", "Panama", "Colombia", 
+    "Venezuela", "Ecuador", "Peru", "Bolivia", "Paraguay", 
+    "Argentina", "Chile"
+  ))
+```
+
+### Mapa de presencia en el Continente Americano
+
+```{r}
+#| label: presencia_general
+#| message: false
+#| warning: false
+
+# Se crean paletas de colores para valores de temperatura y precipitación
+colores_temperatura <- colorNumeric(
+  palette = "inferno", 
+  domain = values(clima_actual$wc2.1_10m_bio_1), 
+  na.color = "transparent"
+)
+
+colores_precipitacion <- colorNumeric(
+  palette = "viridis", 
+  domain = values(clima_actual$wc2.1_10m_bio_12), 
+  na.color = "transparent"
+)
+# Crear paletas de colores
+#colores_temperatura <- colorNumeric("viridis", domain = values(clima_actual$wc2.1_10m_bio_1), na.color = "transparent")
+#colores_precipitacion <- colorNumeric("magma", domain = values(clima_actual$wc2.1_10m_bio_12), na.color = "transparent")
+
+# Mapa interactivo
+leaflet() |>
+  addTiles(group = "Mapa general") |>
+  addProviderTiles(
+    providers$Esri.WorldImagery, 
+    group = "Imágenes satelitales"
+  ) |>  
+  addProviderTiles(
+    providers$CartoDB.Positron, 
+    group = "Mapa blanco"
+  ) |>
+  addRasterImage( # capa raster de temperatura
+    clima_actual$wc2.1_10m_bio_1,
+    colors = colores_temperatura, # paleta de colores
+    opacity = 0.6,
+    group = "Temperatura"
+  ) |>
+  addRasterImage( # capa raster de precipitación
+    clima_actual$wc2.1_10m_bio_12,
+    colors = colores_precipitacion, # paleta de colores
+    opacity = 0.6,
+    group = "Precipitación"
+  ) |>
+  addCircleMarkers(
+    # capa de registros de presencia (puntos)
+    data = Continente_Americano, # Usar el conjunto filtrado
+    stroke = FALSE,
+    radius = 3,
+    fillColor = 'red',
+    fillOpacity = 1,
+    popup = paste(
+      paste0("<strong>País: </strong>", Continente_Americano$country),
+      paste0("<strong>Localidad: </strong>", Continente_Americano$locality),
+      paste0("<strong>Fecha: </strong>", Continente_Americano$eventDate),
+      paste0("<strong>Fuente: </strong>", Continente_Americano$institutionCode),
+      paste0("<a href='", Continente_Americano$occurrenceID, "'>Más información</a>"),
+      sep = '<br/>'
+    ),
+    group = "Registros de Myrmecophaga tridactyla"
+  ) |>  
+  addLegend(
+    title = "Temperatura (Actual)",
+    values = values(clima_actual$wc2.1_10m_bio_1),
+    pal = colores_temperatura,
+    position = "bottomleft",
+    group = "Temperatura"
+  ) |>
+  addLegend(
+    title = "Precipitación (Actual)",
+    values = values(clima_actual$wc2.1_10m_bio_12),
+    pal = colores_precipitacion,
+    position = "bottomleft",
+    group = "Precipitación"
+  ) |>  
+  addLayersControl(
+    # control de capas
+    baseGroups = c("Mapa general", "Imágenes satelitales", "Mapa blanco"),
+    overlayGroups = c("Temperatura", "Precipitación", "Registros de Myrmecophaga tridactyla"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) |>
+  hideGroup("Precipitación") # Ocultar la capa de precipitación por defecto
+
+
+```
+
+
+### 3.2 Creación de conjuntos de entrenamiento y de evaluación para modelización de presencia
+
+```{r}
+#| label: entrenamiento_o3
+
+# Establecer una "semilla" para garantizar que la selección aleatoria sea reproducible
+set.seed(123)
+
+# Cantidad de registros de presencia
+n_presencia <- nrow(coordenadas_presencia)
+
+# Con sample(), se selecciona aleatoriamente una proporción (ej. 0.7) 
+# de los índices de los datos de presencia para el conjunto de entrenamiento
+indices_entrenamiento <- sample(
+  1:n_presencia, 
+  size = round(0.7 * n_presencia)
+)
+
+# Crear el subconjunto de entrenamiento utilizando los índices seleccionados
+entrenamiento <- coordenadas_presencia[indices_entrenamiento, ]
+# Crear el subconjunto de evaluación con los datos restantes
+evaluacion <- coordenadas_presencia[-indices_entrenamiento, ]
+
+```
+
+### 3.3. Ejecución Modelo Presencia 
+
+```{r}
+
+#| label: Modelo_presencia
+
+
+# Ejecutar el modelo
+modelo_maxent <- maxent(x = clima_actual, p = entrenamiento)
+
+# Aplicar el modelo entrenado a las variables climáticas 
+# para generar un mapa de idoneidad del hábitat
+prediccion_presencia <- predict(modelo_maxent, clima_actual)
+
+# terra::extract() extrae los valores del raster de predicción 
+# en las coordenadas de evaluación
+# eval_pres almacena los valores de idoneidad predichos 
+# en los puntos de evaluación de presencia
+eval_pres <- terra::extract(
+  prediccion_presencia, 
+  evaluacion[, c('decimalLongitude', 'decimalLatitude')]
+)
+
+# Generar puntos aleatorios dentro del área de estudio definida. 
+# Estos puntos se asumen como ausencias de la especie.
+ausencias <- randomPoints(mask = clima_actual, n = 1000)
+
+# eval_aus almacena los valores de idoneidad predichos
+# en los puntos de ausencia
+eval_aus <- terra::extract(
+  prediccion_presencia, 
+  ausencias
+)
+
+```
+
+```{r}
+#| label: roc_02
+#| message: false
+#| warning: false
+
+
+# Generar estadísticas de evaluación del modelo
+resultado_evaluacion <- evaluate(p = eval_pres, a = eval_aus)
+
+# Datos para graficar la curva ROC
+datos_roc <- data.frame(
+  FPR = resultado_evaluacion@FPR,
+  TPR = resultado_evaluacion@TPR,
+  Umbral = resultado_evaluacion@t
+)
+
+# Valor AUC
+auc <- resultado_evaluacion@auc
+
+# Gráfico ggplot2
+grafico_ggplot2 <-
+  ggplot(
+    datos_roc, 
+    aes(
+      x = FPR, 
+      y = TPR,
+      u = Umbral
+    )
+  ) +
+  geom_line(
+    color = "blue", 
+    size = 1
+  ) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(title = paste("Curva ROC (AUC =", round(auc, 3), ")"),
+       x = "Tasa de falsos positivos (FPR)",
+       y = "Tasa de verdaderos positivos (TPR)") +
+  theme_minimal()
+
+# Gráfico plotly
+ggplotly(grafico_ggplot2) |> 
+  config(locale = 'es')
+```
+
+
+El valor del AUC es de 0,975, lo que indica que que el modelo tiene un excelente redimiento para la predición de la probabilidad de entrar el oso caballo en su hábitat idóneo.
+
+
+## 3.5 Mapa interactivo de probabilidad de distribución de Myrmecophaga tridactyla en América.
+
+```{r}
+#| label: Mapa_probabilidad_distribucion
+#| message: false
+#| warning: false
+
+# Paleta de colores del modelo
+colores_modelo <- colorNumeric(
+  palette = c("white", "#756bb1"),
+  values(prediccion_presencia),
+  na.color = "transparent"
+)
+
+# Mapa modelo de distribución
+leaflet() |>
+  addTiles(group = "Mapa general") |>
+  addProviderTiles(
+    providers$Esri.WorldImagery, 
+    group = "Imágenes satelitales"
+  ) |>  
+  addProviderTiles(
+    providers$CartoDB.Positron, 
+    group = "Mapa blanco"
+  ) |>
+  fitBounds(
+    lng1 = -170, lat1 = 83,  # Extensión America esquina superior izquierda (West, North)
+    lng2 = -30, lat2 = -55   # Extensión America esquina inferior derecha (East, South)
+  ) |> 
+  addRasterImage( # capa raster de temperatura
+    clima_actual$wc2.1_10m_bio_1,
+    colors = colores_temperatura, # paleta de colores
+    opacity = 0.6,
+    group = "Temperatura",
+  ) |>
+  addRasterImage( # capa raster de precipitación
+    clima_actual$wc2.1_10m_bio_12,
+    colors = colores_precipitacion, # paleta de colores
+    opacity = 0.6,
+    group = "Precipitación",
+  ) |>
+  addRasterImage( # capa raster del modelo de distribución
+    prediccion_presencia,
+    colors = colores_modelo,
+    opacity = 0.6,
+    group = "Modelo de distribución",
+  ) |>  
+  addCircleMarkers(
+    # capa de registros de presencia (puntos)
+    data = Continente_Americano, # Usar el conjunto filtrado
+    stroke = F,
+    radius = 3,
+    fillColor = 'red',
+    fillOpacity = 1,
+    popup = paste(
+      paste0("<strong>País: </strong>", presencia$country),
+      paste0("<strong>Localidad: </strong>", presencia$locality),
+      paste0("<strong>Fecha: </strong>", presencia$eventDate),
+      paste0("<strong>Fuente: </strong>", presencia$institutionCode),
+      paste0("<a href='", presencia$occurrenceID, "'>Más información</a>"),
+      sep = '<br/>'
+    ),
+    group = "Registros de Myrmecophaga tridactyla"
+  ) |>  
+  addLegend(
+    title = "Temperatura",
+    values = values(clima_actual$wc2.1_10m_bio_1),
+    pal = colores_temperatura,
+    position = "bottomleft",
+    group = "Temperatura"
+  ) |>
+  addLegend(
+    title = "Precipitación",
+    values = values(clima_actual$wc2.1_10m_bio_12),
+    pal = colores_precipitacion,
+    position = "bottomleft",
+    group = "Precipitación"
+  ) |>
+  addLegend(
+    title = "Modelo de distribución",
+    values = values(prediccion_presencia),
+    pal = colores_modelo,
+    position = "bottomright",
+    group = "Modelo de distribución"
+  ) |>  
+  addLayersControl(
+    # control de capas
+    baseGroups = c("Mapa general", "Imágenes satelitales", "Mapa blanco"),
+    overlayGroups = c(
+      "Temperatura",
+      "Precipitación",
+      "Modelo de distribución",
+      "Registros de Myrmecophaga tridactyla"
+    )
+  ) |>
+  hideGroup("Temperatura") |>
+  hideGroup("Precipitación")
+
+```
+
+## 3.6 Mapa binario de probabilidad de distribución de Myrmecophaga tridactyla en América.
+
+```{r}
+#| label: Mapa_binario
+#| message: false
+#| warning: false
+
+# Definir el umbral
+umbral <- 0.7
+
+# Crear el raster binario
+prediccion_binaria <- (prediccion_presencia >= umbral) * 1
+
+# Crear la paleta de colores para el raster binario
+colores_prediccion_binaria <- colorFactor(
+  palette = c("transparent", "blue"),  # "transparent" para las áreas no adecuadas
+  domain = c(0, 1),
+  na.color = "transparent"
+)
+
+# Mapa
+leaflet() |>
+  addTiles(group = "Mapa general") |>
+  addProviderTiles(
+    providers$Esri.WorldImagery, 
+    group = "Imágenes satelitales"
+  ) |>
+  addProviderTiles(
+    providers$CartoDB.Positron, 
+    group = "Mapa blanco"
+  ) |>
+  addRasterImage(
+    prediccion_binaria,
+    colors = colores_prediccion_binaria,
+    opacity = 0.6,
+    group = "Modelo de distribución binario",
+  ) |>
+  addCircleMarkers(
+    data = Continente_Americano, # Usar el conjunto filtrado
+    stroke = FALSE,
+    radius = 3,
+    fillColor = 'red',
+    fillOpacity = 1,
+    popup = paste(
+      paste0("<strong>País: </strong>", presencia$country),
+      paste0("<strong>Localidad: </strong>", presencia$locality),
+      paste0("<strong>Fecha: </strong>", presencia$eventDate),
+      paste0("<strong>Fuente: </strong>", presencia$institutionCode),
+      paste0("<a href='", presencia$occurrenceID, "'>Más información</a>"),
+      sep = '<br/>'
+    ),
+    group = "Registros de Myrmecophaga tridactyla"
+  ) |>
+  addLegend(
+    title = "Modelo de distribución binario",
+    labels = c("Ausencia", "Presencia"),
+    colors = c("transparent", "blue"),
+    position = "bottomright",
+    group = "Modelo de distribución binario"
+  ) |>
+  addLayersControl(
+    baseGroups = c("Mapa general", "Imágenes satelitales", "Mapa blanco"),
+    overlayGroups = c(
+      "Modelo de distribución binario",
+      "Registros de Myrmecophaga tridactyla"
+    )
+  )
+```
+Un mapa binario con un umbral de 0.7 muestra áreas donde potencialmente podría distribuirse la especie. 
+Si seleccionamos un umbral de 0.5, el mapa binario mostrará una mayor extensión de áreas en las que la especie podría estar presente. Este enfoque es útil para identificar hábitats potenciales en un contexto de conservación más general. Con un umbral de 0.8, el mapa se centrará en las áreas de mayor calidad de hábitat, lo que es útil para priorizar esfuerzos de conservación en zonas críticas.
+
+En este caso se seleccionó un umbral de 0.7 para ampliar un poco el área de donde se pueden encotar con mas certeza. Sin embargo al ser una especie con requerimientos muy especificos y basatentes sensibles a los cambios, saber con más certeza los posibles áreas de conservación. 
+
+## 3.5 Mapa interactivo de idoneidad de distribución de Myrmecophaga tridactyla en América, actual, futuro y diferencia.
+
+```{r}
+#| label: Mapa_idoneidad_PAF
+#| message: false
+#| warning: false
+
+# Crear paletas de colores
+paleta_actual <- colorNumeric("viridis", domain = c(0, 1))
+paleta_futuro <- colorNumeric("viridis", domain = c(0, 1))
+paleta_diferencia <- colorNumeric("RdBu", domain = c(-1, 1))
+
+# Crear el mapa interactivo
+leaflet() |>
+  addTiles(group = "Mapa base") |>  # Fondo de mapa estándar
+  addProviderTiles(providers$Esri.WorldImagery, group = "Imágenes satelitales") |>  # Fondo satelital
+  addRasterImage(
+  prediccion_actual,
+    colors = paleta_actual,
+    opacity = 0.8,
+    group = "Clima Actual"
+  ) |>
+  addRasterImage(
+  prediccion_futuro,
+    colors = paleta_futuro,
+    opacity = 0.8,
+    group = "Clima Futuro"
+  ) |>
+  addRasterImage(
+  diferencia,
+    colors = paleta_diferencia,
+    opacity = 0.8,
+    group = "Diferencia Clima"
+  ) |>
+  addCircleMarkers(
+    data = presencia,
+    fillColor = "blue",
+    fillOpacity = 0.8,
+    stroke = FALSE,
+    radius = 4,
+    popup = ~paste(
+      "<b>País:</b>", country,
+      "<br><b>Localidad:</b>", locality,
+      "<br><b>Fecha:</b>", eventDate
+    ),
+    group = "Registros de Presencia"
+  ) |>
+  addLayersControl(
+    baseGroups = c("Mapa base", "Imágenes satelitales"),
+    overlayGroups = c("Clima Actual", "Clima Futuro", "Diferencia Clima", "Registros de Presencia"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) |>
+  addLegend(
+    "bottomright",
+    pal = paleta_actual,
+    values = c(0, 1),
+    title = "Idoneidad Actual",
+    group = "Clima Actual"
+  ) |>
+  addLegend(
+    "bottomright",
+    pal = paleta_diferencia,
+    values = c(-1, 1),
+    title = "Diferencia",
+    group = "Diferencia Clima"
+  )
+
+```
+
+## 4. Distribución del oso caballo para el clima actual, futuro y diferencia
+
+A continuación se muestra un mapa interactivo binario de distribución (elija un umbral adecuado) para el clima actual, para el clima futuro y su diferencia.
+
+```{r}
+#| label: mapa_futuro
+#| message: false
+#| warning: false
+
+# Paleta de colores del modelo con clima actual
+colores_modelo_actual <- colorNumeric(
+  palette = c("green", "orange"),
+  values(prediccion_actual),
+  na.color = "transparent"
+)
+
+# Paleta de colores del modelo con clima futuro
+colores_modelo_futuro <- colorNumeric(
+  palette = c("white", "black"),
+  values(prediccion_futuro),
+  na.color = "transparent"
+)
+
+# Crear paleta de colores para la diferencia
+paleta_diferencia <- colorNumeric(
+  palette = c("red", "white", "blue"),
+  domain = c(min(values(diferencia), na.rm = TRUE), max(values(diferencia), na.rm = TRUE)),
+  na.color = "transparent"
+)
+
+# Mapa de la diferencia
+leaflet() |>
+  addTiles(group = "Mapa general") |>
+  addProviderTiles(
+    providers$Esri.WorldImagery, 
+    group = "Imágenes satelitales"
+  ) |>  
+  addProviderTiles(
+    providers$CartoDB.Positron, 
+    group = "Mapa blanco"
+  ) |>
+  addRasterImage(
+    prediccion_actual,
+    colors = colores_modelo_actual,
+    opacity = 0.6,
+    group = "Modelo con clima actual",
+  ) |>
+  addRasterImage(
+    prediccion_futuro,
+    colors = colores_modelo_futuro,
+    opacity = 0.6,
+    group = "Modelo con clima futuro",
+  ) |>  
+  addRasterImage(
+    diferencia,
+    colors = paleta_diferencia,
+    opacity = 0.6,
+    group = "Diferencia",
+  ) |>  
+  addLegend(
+    title = "Modelo con clima actual para la especie *Myrmecophaga tridactyla*",
+    values = values(prediccion_actual),
+    pal = colores_modelo_actual,
+    position = "bottomright",
+    group = "Modelo con clima actual"
+  ) |>    
+  addLegend(
+    title = "Modelo con clima futuro para la especie *Myrmecophaga tridactyla*",
+    values = values(prediccion_futuro),
+    pal = colores_modelo_futuro,
+    position = "bottomright",
+    group = "Modelo con clima futuro"
+  ) |>     
+  addLegend(
+    title = "Diferencia",
+    values = values(diferencia),
+    pal = paleta_diferencia,
+    position = "bottomleft",
+    group = "Diferencia"
+  ) |>  
+  addLayersControl(
+    # control de capas
+    baseGroups = c("Mapa general", "Imágenes satelitales", "Mapa blanco"),
+    overlayGroups = c(
+      "Modelo con clima actual",
+      "Modelo con clima futuro",
+      "Diferencia"
+    )
+  ) |>
+  hideGroup("Modelo con clima actual") |>
+  hideGroup("Modelo con clima futuro")
+```
+
+Figura 2. Mapa interactivo de la distribución de la especie *Myrmecophaga tridactyla*
+
+## 5. Desarrollo del modelo
+
+Se desarrollo un modelo de distribución para Myrmecophaga tridactyla en América. Para su desarrollo se utilizó un conjunto de datos filtrado de registros de presencia con coordenadas geográficas precisas para asegurar que los datos cayeran en el continente Americano, donde se distribuye naturalmente la especie. La distribución descrita para la especie comprende desde el Sur de Belize a Panama y algunas partes de Sur America, en especial en tierra bajas (Reid, 1997). Lo que conincide en su mayoría con los datos obtenidos de la libreria "rgbif".
+
+En cuanto a los datos climáticos, como temperatura (bio1) y precipitación (bio12), fueron extraídos del conjunto de datos de WorldClim, proporcionando variables predictoras biológicamente relevantes. Se utilizó el mismo tipo de modelo con datos actuales y de predición de climas futuros, con un escenario 
+El resultado fue un ejemplo robusto de cómo integrar datos ecológicos y climáticos para predecir áreas potenciales de hábitat. 
+
+Para el proceso de modelización de los escenarios actuales, futuros y su diferencia, se empleó el modelo MaxEnt, una herramienta ampliamente aceptada en la modelización de distribución de especies, que maneja eficientemente la presencia de datos sesgados y variables correlacionadas. Los modelos fueron entrenados con un 70% de los datos de presencia, mientras que el 30% restante fue reservado para evaluar la capacidad predictiva del modelo. Luego se procedió a evaluar los modelos mediante métricas como la curva ROC y el valor AUC, indicando la capacidad del modelo para diferenciar entre presencia y ausencia. Un AUC alto refleja un buen desempeño predictivo. 
+
+Se derivó un mapa de idoneidad, que coincide con regiones donde la especie está registrada, como el Amazonas y otras zonas boscosas de América Central y del Sur, lo que demuestra que las variables climáticas seleccionadas tienen un impacto significativo en la distribución de la especie. Y mediante el mapa binario se puede visualizar de una forma más clara las áreas donde la especie podría estar presente (lila) o ausente (blanco). 
+
+En cuanto a la curva ROC, de este modelo, muestra un buen balance entre sensibilidad (detección de presencias verdaderas) y especificidad (rechazo de ausencias falsas), validando la utilidad del modelo para predicción.
+
+Se definió un umbral de 0.8 para convertir la predicción continua en un mapa binario, identificando áreas adecuadas en morado e inadecuadas en blanco para la especie.
+
+Finalmente se representaron los resultados en una serie de mapas interactivos, que permiten una mejor visualización e interpretación . Estas representaciones son herramientas clave para comunicar los hallazgos de manera efectiva a investigadores y tomadores de decisiones. 
+
+El desarrollo del modelos de predicción de distribución para Myrmecophaga tridactyla en América es un ejemplo robusto de cómo integrar datos ecológicos y climáticos para predecir áreas potenciales de hábitat y su relación con escenarios de climas actuales y futuros. Este ejercicio subraya el valor de los modelos predictivos en la conservación de la biodiversidad frente a amenazas como el cambio climático y la pérdida de hábitat.
+
+
+## 6. Referencias
+
+Martínez Meyer, E. (2012). *Introducción al Modelado de Nichos Ecológicos y Distribuciones de Especies*. Instituto de Biología, Universidad Nacional Autónoma de México. Consulta: https://www.recibio.net/wp-content/uploads/2012/11/ENM_EMM.pdf
+
+Mota-Vargas, C., Encarnación-Luévano, A., Ortega-Andrade, H. M., Prieto-Torres, D. A., Peña-Peniche, A., & Rojas-Soto, O. R. (2019). *Una breve introducción a los modelos de nicho ecológico*. En: Moreno CE (Ed) La biodiversidad en un mundo cambiante: Fundamentos teóricos y metodológicos para su estudio. Universidad Autónoma del Estado de Hidalgo/Libermex, Ciudad de México, pp. 39-63.
+
+Oso caballo. (2024). *Áreas protegidas y Parques Nacionales de Costa Rica*. Consulta: https://areasyparques.com/peligroextincion/mamiferos12/
+
+Reid, F. (1977). A Field Guide to the Mammals of Central America and Southeast México. New York Oxford University Press. Maddison, New York.
